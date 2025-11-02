@@ -1,0 +1,62 @@
+# ElasticSearch Configuration
+elasticsearch:
+  host: "127.0.0.1"
+  port: 9200
+  username: "elastic"
+  password: "changeme"
+  use_ssl: false
+  verify_certs: false
+  index_name: "pdf_rag_index"
+
+# Chunking Configuration
+chunking:
+  text_chunk_size: 512
+  text_chunk_overlap: 50
+  table_chunk_mode: "per_table"  # or "split"
+  max_table_size: 1000
+
+# Embedding Configuration
+embedding:
+  url: null  # Set EMBEDDING_URL env var (e.g., http://your-service:9800/v1/emb)
+  dimension: 1024  # qwen3-embedding-0.6b dimension
+  batch_size: 32
+
+# Image Captioning Configuration
+image_captioning:
+  url: null  # Set IMAGE_MODEL_URL env var (e.g., http://your-service:23333/v1)
+  max_image_size: 1024
+  timeout: 30
+
+# Search Configuration
+search:
+  dense_weight: 0.6
+  sparse_weight: 0.4
+  top_k_per_query: 50  # Top-K per query variation
+  final_top_k: 20  # Final results after fusion
+
+# Query Fusion Configuration (RAG Fusion)
+query_fusion:
+  base_url: "https://api.openai.com/v1"  # OpenAI API endpoint
+  model_name: "gpt-5"
+  api_key: null  # Will use OPENAI_API_KEY env var if not set
+  num_variations: 5
+  temperature: 0.7
+
+# Result Fusion Configuration
+result_fusion:
+  rrf_k: 60  # RRF constant
+
+# Reranking Configuration
+reranking:
+  url: null  # Set RERANK_URL env var (e.g., http://your-service:2260/rerank)
+  top_k: 10  # Number of results to rerank
+
+# Generation Configuration
+generation:
+  base_url: "https://api.openai.com/v1"  # OpenAI API endpoint
+  model_name: "gpt-5"
+  api_key: null  # Will use OPENAI_API_KEY env var if not set
+  max_tokens: 2048
+  temperature: 0.7
+  top_p: 0.9
+
