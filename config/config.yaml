@@ -36,8 +36,8 @@ search:
 
 # Query Fusion Configuration (RAG Fusion)
 query_fusion:
-  base_url: "https://api.openai.com/v1"  # OpenAI API endpoint
-  model_name: "gpt-5"
+  base_url: "http://localhost:8001/v1"  # OpenAI-compatible API endpoint
+  model_name: "google/gemma-2b-it"
   api_key: null  # Will use OPENAI_API_KEY env var if not set
   num_variations: 5
   temperature: 0.7
@@ -53,8 +53,8 @@ reranking:
 
 # Generation Configuration
 generation:
-  base_url: "https://api.openai.com/v1"  # OpenAI API endpoint
-  model_name: "gpt-5"
+  base_url: "http://localhost:8001/v1"  # OpenAI-compatible API endpoint
+  model_name: "google/gemma-2b-it"
   api_key: null  # Will use OPENAI_API_KEY env var if not set
   max_tokens: 2048
   temperature: 0.7

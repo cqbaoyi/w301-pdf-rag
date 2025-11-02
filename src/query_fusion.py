@@ -44,7 +44,9 @@ class QueryFusion:
         Returns:
             List of query variations
         """
-        prompt = f"""Given the following user query, generate {self.num_variations} different search query variations.
+        prompt = f"""You are a helpful assistant that generates diverse search query variations.
+
+Given the following user query, generate {self.num_variations} different search query variations.
 Each variation should:
 1. Explore a different aspect or angle of the original query
 2. Use different wording while maintaining the core intent
@@ -58,10 +60,6 @@ Generate {self.num_variations} variations, one per line, without numbering or bu
             response = self.client.chat.completions.create(
                 model=self.llm_model_name,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant that generates diverse search query variations.",
-                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=self.temperature,

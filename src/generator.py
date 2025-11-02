@@ -1,7 +1,8 @@
 """Response generation module with citations."""
 
 import logging
-from typing import List, Optional
+import re
+from typing import List, Optional, Set
 from openai import OpenAI
 from .retriever import RetrievedDocument
 
@@ -39,6 +40,41 @@ class ResponseGenerator:
         self.temperature = temperature
         self.top_p = top_p
 
+    def _extract_cited_references(self, text: str) -> Set[int]:
+        """Extract citation numbers from the response text.
+        
+        Args:
+            text: Response text containing citations like [1], [2], etc.
+            
+        Returns:
+            Set of cited reference numbers
+        """
+        # Find all citation patterns like [1], [2], etc. in the text
+        # Match patterns like [1], [2], [10], etc., but not in the References section
+        citations = set()
+        
+        # Split text into main content and references section
+        ref_section_start = -1
+        for marker in ["References:", "references:"]:
+            idx = text.find(marker)
+            if idx != -1 and (ref_section_start == -1 or idx < ref_section_start):
+                ref_section_start = idx
+        
+        # Only search in the main content (before references section)
+        search_text = text[:ref_section_start] if ref_section_start != -1 else text
+        
+        # Find all [number] patterns
+        pattern = r'\[(\d+)\]'
+        matches = re.findall(pattern, search_text)
+        
+        for match in matches:
+            try:
+                citations.add(int(match))
+            except ValueError:
+                continue
+        
+        return citations
+
     def generate(
         self, query: str, retrieved_docs: List[RetrievedDocument]
     ) -> str:
@@ -51,9 +87,16 @@ class ResponseGenerator:
         Returns:
             Generated response with citations
         """
+        # Filter out documents with empty or very short content
+        MIN_CONTENT_LENGTH = 10
+        valid_docs = [
+            doc for doc in retrieved_docs 
+            if doc.content and len(doc.content.strip()) >= MIN_CONTENT_LENGTH
+        ]
+        
         # Format context with citations
         context_parts = []
-        for idx, doc in enumerate(retrieved_docs, start=1):
+        for idx, doc in enumerate(valid_docs, start=1):
             citation = f"[{idx}]"
             context_parts.append(
                 f"{citation} Source: {doc.source}, Page: {doc.page_number}\n"
@@ -63,7 +106,7 @@ class ResponseGenerator:
         context = "\n\n".join(context_parts)
 
         # Build prompt
-        prompt = f"""You are a helpful assistant that answers questions based on the provided context documents.
+        prompt = f"""You are a helpful assistant that provides accurate, well-cited answers based on provided context documents.
 Use citations [1], [2], etc. to reference the source documents when using information from them.
 
 Context Documents:
@@ -71,16 +114,12 @@ Context Documents:
 
 Question: {query}
 
-Answer the question using information from the context documents. Include citations [1], [2], etc. in your response when referencing specific documents. At the end, provide a "References:" section listing all cited sources with their details."""
+Answer the question using information from the context documents. Include citations [1], [2], etc. in your response when referencing specific documents. Do not include a References section - it will be added automatically."""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.llm_model_name,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant that provides accurate, well-cited answers based on provided context.",
-                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=self.temperature,
@@ -90,11 +129,21 @@ Answer the question using information from the context documents. Include citati
 
             answer = response.choices[0].message.content.strip()
 
-            # Ensure references section is present
-            if "References:" not in answer and "references:" not in answer:
+            # Extract which citations were actually used in the response
+            cited_refs = self._extract_cited_references(answer)
+            
+            # Remove any existing References section to rebuild it
+            answer = re.sub(r'\n\nReferences:.*', '', answer, flags=re.DOTALL)
+            answer = re.sub(r'\n\nreferences:.*', '', answer, flags=re.DOTALL)
+            
+            # Build references section only for actually cited documents
+            if cited_refs:
                 answer += "\n\nReferences:\n"
-                for idx, doc in enumerate(retrieved_docs, start=1):
-                    answer += f"[{idx}] {doc.source}, Page {doc.page_number} ({doc.chunk_type})\n"
+                for ref_num in sorted(cited_refs):
+                    # ref_num is 1-indexed, so we need to map it back to valid_docs
+                    if 1 <= ref_num <= len(valid_docs):
+                        doc = valid_docs[ref_num - 1]
+                        answer += f"[{ref_num}] {doc.source}, Page {doc.page_number} ({doc.chunk_type})\n"
 
             logger.info(f"Generated response for query: {query[:50]}...")
             return answer
