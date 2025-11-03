@@ -249,3 +249,11 @@ class Config:
         """
         return self.config.get("generation", {})
 
+    def get_pdf_processing_config(self) -> Dict[str, Any]:
+        """Get PDF processing configuration.
+
+        Returns:
+            PDF processing configuration dictionary
+        """
+        return self.config.get("pdf_processing", {})
+

@@ -91,9 +91,11 @@ class ImageCaptioner:
 
             # Make request
             chat_url = f"{self.image_model_url}/chat/completions"
+            logger.debug(f"Sending image captioning request to {chat_url} (timeout: {self.timeout}s)")
             response = requests.post(
                 chat_url, json=payload, headers=headers, timeout=self.timeout
             )
+            logger.debug(f"Received response with status {response.status_code}")
             response.raise_for_status()
 
             result = response.json()
@@ -102,8 +104,13 @@ class ImageCaptioner:
             logger.debug(f"Generated caption: {caption[:100]}...")
             return caption
 
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout captioning image after {self.timeout}s")
+            return None
         except Exception as e:
-            logger.error(f"Error captioning image: {e}")
+            # Only log exception type and message, not full exception (may contain binary data)
+            error_msg = str(e)[:200] if len(str(e)) <= 200 else str(e)[:200] + "..."
+            logger.error(f"Error captioning image: {type(e).__name__}: {error_msg}")
             return None
 
     def caption_images_batch(

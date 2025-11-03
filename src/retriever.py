@@ -52,13 +52,21 @@ class HybridRetriever:
         self,
         query: str,
         query_embedding: List[float],
-        top_k: int = 50,
+        top_k: int = 20,  # Default should match config.yaml search.top_k_per_query
     ) -> List[RetrievedDocument]:
-        """Retrieve documents using hybrid search."""
+        """Retrieve documents using hybrid search.
+        
+        Args:
+            query: Query text
+            query_embedding: Query embedding vector
+            top_k: Number of documents to retrieve (should match config search.top_k_per_query)
+        """
         if not query_embedding:
             logger.warning("Empty query embedding, falling back to sparse search only")
             return self._sparse_search_documents(query, top_k)
 
+        # Retrieve more candidates from each search type for better hybrid combination
+        # Using 2x multiplier to get sufficient candidates for combining
         dense_results = self._dense_search(query_embedding, top_k * 2)
         sparse_results = self._sparse_search(query, top_k * 2)
         return self._combine_results(dense_results, sparse_results, top_k)

@@ -114,7 +114,16 @@ class EmbeddingService:
                     error_detail = response.json()
                     logger.error(f"Embedding API error {response.status_code}: {error_detail}")
                 except:
-                    logger.error(f"Embedding API error {response.status_code}: {response.text[:200]}")
+                    # Try to decode as text, but avoid printing binary data
+                    try:
+                        error_text = response.text[:200]
+                        # Check if it's likely binary (contains many non-printable chars)
+                        if any(ord(c) < 32 and c not in '\n\r\t' for c in error_text[:50]):
+                            logger.error(f"Embedding API error {response.status_code}: [Binary or non-text response]")
+                        else:
+                            logger.error(f"Embedding API error {response.status_code}: {error_text}")
+                    except:
+                        logger.error(f"Embedding API error {response.status_code}: [Unable to decode response]")
             
             response.raise_for_status()
 
@@ -158,7 +167,9 @@ class EmbeddingService:
             return result_embeddings
 
         except Exception as e:
-            logger.error(f"Error generating embeddings: {e}")
+            # Only log exception type and message, not full exception (may contain binary data)
+            error_msg = str(e)[:200] if len(str(e)) <= 200 else str(e)[:200] + "..."
+            logger.error(f"Error generating embeddings: {type(e).__name__}: {error_msg}")
             import traceback
             logger.debug(traceback.format_exc())
             return [None] * len(texts)

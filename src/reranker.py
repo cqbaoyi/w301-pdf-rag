@@ -29,20 +29,29 @@ class Reranker:
         self.timeout = timeout
 
     def rerank(
-        self, query: str, documents: List[RetrievedDocument], top_k: int = 10
+        self, query: str, documents: List[RetrievedDocument], top_k: int = 5
     ) -> List[RetrievedDocument]:
         """Rerank documents using reranking service.
 
         Args:
             query: Query text
             documents: List of documents to rerank
-            top_k: Number of top documents to return
+            top_k: Number of top documents to return (should match config search.final_top_k)
 
         Returns:
             Reranked list of documents
         """
         if not documents:
             return []
+
+        # Enforce API limit of 100 documents
+        MAX_RERANK_DOCS = 100
+        if len(documents) > MAX_RERANK_DOCS:
+            logger.warning(
+                f"Limiting {len(documents)} documents to {MAX_RERANK_DOCS} for reranker API "
+                f"(API maximum is {MAX_RERANK_DOCS})"
+            )
+            documents = documents[:MAX_RERANK_DOCS]
 
         try:
             # Prepare request
@@ -146,6 +155,9 @@ class Reranker:
                 else:
                     logger.warning(f"Could not match reranked document to original: index={original_index}, text={doc_text[:50] if doc_text else 'unknown'}")
 
+            # Limit to top_k results
+            reranked_docs = reranked_docs[:top_k]
+            
             logger.info(
                 f"Reranked {len(documents)} documents, returning top {len(reranked_docs)}"
             )

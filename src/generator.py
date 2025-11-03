@@ -94,40 +94,67 @@ class ResponseGenerator:
             if doc.content and len(doc.content.strip()) >= MIN_CONTENT_LENGTH
         ]
         
-        # Format context with citations
+        # Format context with citations - make it more readable and structured
         context_parts = []
         for idx, doc in enumerate(valid_docs, start=1):
             citation = f"[{idx}]"
+            # Include chunk type for better context understanding
+            chunk_type_info = f" ({doc.chunk_type})" if doc.chunk_type != "text" else ""
             context_parts.append(
-                f"{citation} Source: {doc.source}, Page: {doc.page_number}\n"
-                f"Content: {doc.content}"
+                f"{citation} Source: {doc.source}, Page: {doc.page_number}{chunk_type_info}\n"
+                f"{doc.content}"
             )
 
-        context = "\n\n".join(context_parts)
+        context = "\n\n---\n\n".join(context_parts)
 
-        # Build prompt
-        prompt = f"""You are a helpful assistant that provides accurate, well-cited answers based on provided context documents.
-Use citations [1], [2], etc. to reference the source documents when using information from them.
+        # Log the context being sent to LLM for diagnostics
+        logger.info("\n" + "=" * 80)
+        logger.info("CONTEXT BEING SENT TO GENERATOR:")
+        logger.info("=" * 80)
+        logger.info(f"Number of documents: {len(valid_docs)}")
+        logger.info(f"Query: {query}")
+        logger.info("\nFormatted Context:")
+        logger.info(context)
+        logger.info("=" * 80 + "\n")
 
-Context Documents:
+        # Build prompt optimized for instruction-tuned models
+        # Using a clearer structure that works better with smaller models like gemma-2b-it
+        # The prompt structure uses clear labels and imperative instructions
+        prompt = f"""Answer the question using the information provided in the context documents below.
+
+CONTEXT DOCUMENTS:
 {context}
 
-Question: {query}
+QUESTION: {query}
 
-Answer the question using information from the context documents. Include citations [1], [2], etc. in your response when referencing specific documents. Do not include a References section - it will be added automatically."""
+Your task:
+1. Read each context document carefully
+2. Find information that directly answers the question
+3. Write a clear answer using that information
+4. Cite sources using [1], [2], etc. after each fact
+5. Be specific - quote or paraphrase exact details from the context
+6. If you find relevant information in the context, you MUST use it - do not say there is no information
+
+Write your answer:"""
 
         try:
+            # Use system message for better instruction following (if supported)
+            # Some models work better with system messages
+            messages = []
+            messages.append({"role": "user", "content": prompt})
+            
             response = self.client.chat.completions.create(
                 model=self.llm_model_name,
-                messages=[
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 temperature=self.temperature,
                 top_p=self.top_p,
                 max_tokens=self.max_tokens,
             )
 
             answer = response.choices[0].message.content.strip()
+            
+            # Log the raw response for diagnostics
+            logger.info(f"\nRaw LLM response (first 500 chars): {answer[:500]}")
 
             # Extract which citations were actually used in the response
             cited_refs = self._extract_cited_references(answer)

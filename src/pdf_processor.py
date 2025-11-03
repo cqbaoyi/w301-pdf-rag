@@ -44,14 +44,23 @@ class ImageExtract:
 class PDFProcessor:
     """Processor for extracting content from PDF files."""
 
-    def __init__(self, prefer_pdfplumber: bool = True):
+    def __init__(
+        self,
+        prefer_pdfplumber: bool = True,
+        min_image_dimension: int = 50,
+        min_image_area: int = 2500,
+    ):
         """Initialize PDF processor.
 
         Args:
             prefer_pdfplumber: If True, use pdfplumber for table extraction,
                 otherwise use PyMuPDF for everything
+            min_image_dimension: Minimum width or height in pixels to include image
+            min_image_area: Minimum area (width * height) in pixels² to include image
         """
         self.prefer_pdfplumber = prefer_pdfplumber
+        self.min_image_dimension = min_image_dimension
+        self.min_image_area = min_image_area
 
     def process(self, pdf_path: Path) -> Tuple[List[TextExtract], List[TableExtract], List[ImageExtract]]:
         """Process PDF file and extract text, tables, and images.
@@ -71,6 +80,7 @@ class PDFProcessor:
         # Extract text and images using PyMuPDF
         text_extracts = []
         image_extracts = []
+        total_filtered_count = 0
 
         try:
             doc = fitz.open(str(pdf_path))
@@ -95,6 +105,7 @@ class PDFProcessor:
 
                 # Extract images
                 image_list = page.get_images(full=True)
+                page_filtered_count = 0
                 for img_idx, img in enumerate(image_list):
                     try:
                         xref = img[0]
@@ -112,6 +123,18 @@ class PDFProcessor:
                             rect = page.rect
                             bbox = (0, 0, rect.width, rect.height)
 
+                        # Filter out small images
+                        width = bbox[2] - bbox[0]
+                        height = bbox[3] - bbox[1]
+                        area = width * height
+                        
+                        if (width < self.min_image_dimension or 
+                            height < self.min_image_dimension or 
+                            area < self.min_image_area):
+                            page_filtered_count += 1
+                            total_filtered_count += 1
+                            continue
+
                         image_extracts.append(
                             ImageExtract(
                                 image_bytes=image_bytes,
@@ -125,6 +148,12 @@ class PDFProcessor:
                         logger.warning(
                             f"Error extracting image {img_idx} from page {page_num + 1}: {e}"
                         )
+                
+                if page_filtered_count > 0:
+                    logger.debug(
+                        f"Filtered out {page_filtered_count} small images from page {page_num + 1} "
+                        f"(min dimension: {self.min_image_dimension}px, min area: {self.min_image_area}px²)"
+                    )
 
             doc.close()
 
@@ -167,6 +196,11 @@ class PDFProcessor:
             f"{len(table_extracts)} tables, "
             f"{len(image_extracts)} images"
         )
+        if total_filtered_count > 0:
+            logger.info(
+                f"Filtered out {total_filtered_count} small images "
+                f"(min dimension: {self.min_image_dimension}px, min area: {self.min_image_area}px²)"
+            )
 
         return text_extracts, table_extracts, image_extracts
 

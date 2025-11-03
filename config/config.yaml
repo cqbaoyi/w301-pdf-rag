@@ -8,6 +8,11 @@ elasticsearch:
   verify_certs: false
   index_name: "pdf_rag_index"
 
+# PDF Processing Configuration
+pdf_processing:
+  min_image_dimension: 50  # Minimum width or height in pixels to include image
+  min_image_area: 2500  # Minimum area (width * height) in pixels² to include image
+
 # Chunking Configuration
 chunking:
   text_chunk_size: 512
@@ -31,15 +36,17 @@ image_captioning:
 search:
   dense_weight: 0.6
   sparse_weight: 0.4
-  top_k_per_query: 50  # Top-K per query variation
-  final_top_k: 20  # Final results after fusion
+  top_k_per_query: 20  # Top-K per query variation
+  final_top_k: 5  # Final results after fusion
 
 # Query Fusion Configuration (RAG Fusion)
 query_fusion:
   base_url: "http://localhost:8001/v1"  # OpenAI-compatible API endpoint
   model_name: "google/gemma-2b-it"
   api_key: null  # Will use OPENAI_API_KEY env var if not set
-  num_variations: 5
+  max_variations: 2  # Maximum candidate variations to generate (system uses quality ones)
+  min_similarity_threshold: 0.85  # Reject variations too similar to original (0.0-1.0)
+  min_variation_similarity: 0.90  # Reject variations too similar to each other (0.0-1.0)
   temperature: 0.7
 
 # Result Fusion Configuration
@@ -49,7 +56,8 @@ result_fusion:
 # Reranking Configuration
 reranking:
   url: null  # Set RERANK_URL env var (e.g., http://your-service:2260/rerank)
-  top_k: 10  # Number of results to rerank
+  top_k: 10  # Number of results to return after reranking
+  max_rerank_input: 100  # Maximum documents to send to reranker API (API limit)
 
 # Generation Configuration
 generation:

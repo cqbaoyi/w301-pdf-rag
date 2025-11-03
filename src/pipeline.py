@@ -63,7 +63,9 @@ class QueryPipeline:
             llm_base_url=query_fusion_config.get("base_url", "https://api.openai.com/v1"),
             llm_model_name=query_fusion_config.get("model_name", "gpt-5"),
             api_key=query_fusion_config.get("api_key"),
-            num_variations=query_fusion_config.get("num_variations", 5),
+            max_variations=query_fusion_config.get("max_variations", query_fusion_config.get("num_variations", 5)),
+            min_similarity_threshold=query_fusion_config.get("min_similarity_threshold", 0.85),
+            min_variation_similarity=query_fusion_config.get("min_variation_similarity", 0.90),
             temperature=query_fusion_config.get("temperature", 0.7),
         )
 
@@ -106,13 +108,20 @@ class QueryPipeline:
             # Step 1: Generate query variations (RAG Fusion)
             query_variations = self.query_fusion.generate_variations(user_query)
             logger.info(f"Generated {len(query_variations)} query variations")
+            print("\n" + "=" * 80)
+            print("QUERY VARIATIONS:")
+            print("=" * 80)
+            for idx, variation in enumerate(query_variations, start=1):
+                print(f"{idx}. {variation}")
+            print("=" * 80 + "\n")
 
             # Step 2: Generate embeddings for all query variations
             query_embeddings = self.embedding_service.embed_texts(query_variations)
 
             # Step 3: Retrieve documents for each query variation
             search_config = self.config.get_search_config()
-            top_k_per_query = search_config.get("top_k_per_query", 50)
+            top_k_per_query = search_config.get("top_k_per_query", 20)  # From config.yaml
+            final_top_k = search_config.get("final_top_k", 5)  # From config.yaml - final results sent to generator
 
             all_query_results = []
             for query_text, query_embedding in zip(
@@ -134,13 +143,41 @@ class QueryPipeline:
 
             # Step 4: Fuse results from all query variations
             fused_results = self.result_fusion.fuse(all_query_results)
+            logger.info(f"Fused results: {len(fused_results)} unique documents from {len(all_query_results)} query variations")
 
             # Step 5: Rerank fused results
             reranking_config = self.config.get_reranking_config()
-            top_k_rerank = reranking_config.get("top_k", 10)
+            max_rerank_input = reranking_config.get("max_rerank_input", 100)  # Limit before sending to API
+            
+            # Limit fused results to max_rerank_input before sending to reranker API
+            if len(fused_results) > max_rerank_input:
+                logger.info(
+                    f"Limiting {len(fused_results)} fused results to {max_rerank_input} "
+                    f"before reranking (API limit)"
+                )
+                fused_results = fused_results[:max_rerank_input]
+            
+            # Rerank using final_top_k to get the final number of results
             reranked_results = self.reranker.rerank(
-                user_query, fused_results, top_k=top_k_rerank
+                user_query, fused_results, top_k=final_top_k
             )
+
+            # Log top ranked results for diagnostics (using final_top_k value)
+            logger.info("\n" + "=" * 80)
+            logger.info(f"TOP {final_top_k} RANKED RESULTS SENT TO GENERATOR:")
+            logger.info("=" * 80)
+            for idx, doc in enumerate(reranked_results[:final_top_k], start=1):
+                content_preview = doc.content[:150].replace("\n", " ") if doc.content else "(empty)"
+                if len(doc.content) > 150:
+                    content_preview += "..."
+                logger.info(
+                    f"[{idx}] Type: {doc.chunk_type} | "
+                    f"Source: {doc.source} | Page: {doc.page_number} | "
+                    f"Score: {doc.score:.4f}"
+                )
+                logger.info(f"    Content: {content_preview}")
+                logger.info("")
+            logger.info("=" * 80 + "\n")
 
             # Step 6: Generate response
             response = self.generator.generate(user_query, reranked_results)

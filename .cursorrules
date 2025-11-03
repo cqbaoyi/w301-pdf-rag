@@ -1,0 +1,41 @@
+# w301-pdf-rag Cursor Rules
+
+## Project Overview
+PDF RAG system with hybrid search (dense + sparse), query fusion (RAG Fusion), and LLM-based response generation. Processes PDFs with text, tables, and images.
+
+## Architecture
+- **Modular pipeline design**: Separate components for PDF processing, chunking, embedding, retrieval, fusion, reranking, generation
+- **Configuration-driven**: YAML config (`config/config.yaml`) with environment variable overrides
+- **Service-oriented**: Uses external services for embeddings, reranking, image captioning, LLM
+
+## Code Style
+- Type hints required for function parameters and returns
+- Use logging module (not print) for all output
+- Error handling: catch exceptions, log sanitized errors (avoid binary data in logs)
+- Prefer configuration over hardcoding
+- Docstrings for classes and public methods
+
+## Key Patterns
+- **Image filtering**: Filter small images (<50px or <2500px² area) before captioning
+- **Quality filtering**: Dynamic query variation filtering based on similarity thresholds
+- **Non-blocking errors**: Continue processing when individual items fail (e.g., image captioning)
+- **Progress logging**: Show progress for long-running operations (image processing, indexing)
+
+## Important Files
+- `main.py`: CLI entry point
+- `src/pipeline.py`: Query processing pipeline
+- `src/indexing_pipeline.py`: PDF indexing pipeline
+- `src/config.py`: Configuration management
+- `config/config.yaml`: Default configuration
+
+## Configuration
+- Add new config options to both `config/config.yaml` and `src/config.py`
+- Support environment variable overrides for all service URLs and API keys
+- Use sensible defaults for optional parameters
+
+## Error Handling
+- Never log binary data (image bytes, embeddings) - truncate or use type names
+- Use try-except with specific exception types when possible
+- Log errors at appropriate levels (ERROR for failures, WARNING for fallbacks, DEBUG for details)
+- Provide fallback behavior when services fail (e.g., use original query if variation generation fails)
+
