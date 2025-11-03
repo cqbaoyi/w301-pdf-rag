@@ -1,12 +1,15 @@
 # w301-pdf-rag
 
-A RAG (Retrieval Augmented Generation) system for querying PDF documents using hybrid search, query fusion, and LLM-based response generation.
+A RAG (Retrieval Augmented Generation) system for querying PDF documents. Features hybrid search (vector + BM25), query fusion, and LLM-based response generation with citations.
 
-## Overview
+## Features
 
-This system enables you to:
-- **Index PDFs**: Extract text, tables, and images from PDF files, generate embeddings, and store them in ElasticSearch
-- **Query Documents**: Ask questions and get answers with citations using advanced RAG techniques including query fusion and hybrid search
+- **Multi-modal PDF processing**: Extracts text, tables, and images (with automatic captioning)
+- **Hybrid search**: Combines dense vector search with sparse BM25 keyword search
+- **Query fusion**: Generates query variations for better retrieval coverage
+- **Result fusion**: Merges results using Reciprocal Rank Fusion (RRF)
+- **Reranking**: Uses neural reranking to improve final results
+- **Citation support**: Generates answers with source citations
 
 ## Quick Start
 
@@ -43,44 +46,42 @@ This system enables you to:
 
 ### Required Environment Variables
 
-These must be set before running:
-
 ```bash
-# Service endpoints
-export EMBEDDING_URL=http://your-service:9800/v1/emb      # Embedding service
-export RERANK_URL=http://your-service:2260/rerank         # Reranking service
-export IMAGE_MODEL_URL=http://your-service:23333/v1       # Image captioning service
-export OPENAI_API_KEY=your-api-key-here                   # OpenAI API key
+export EMBEDDING_URL=http://your-service:9800/v1/emb      # Embedding service endpoint
+export RERANK_URL=http://your-service:2260/rerank         # Reranking service endpoint
+export IMAGE_MODEL_URL=http://your-service:23333/v1       # Image captioning service endpoint
+export OPENAI_API_KEY=your-api-key-here                   # API key for LLM services
 ```
 
-### Optional Configuration
+### Configuration File
 
-Set in `config/config.yaml` or via environment variables:
+Edit `config/config.yaml` to customize:
 
-- ElasticSearch settings (host, port, credentials, index name)
-- Chunking parameters (chunk size, overlap, table handling)
-- Search weights (dense vs sparse)
-- LLM settings (model, temperature, max tokens)
+- **ElasticSearch**: Host, port, credentials, index name
+- **Chunking**: Text chunk size (default: 512), overlap (default: 50), table handling
+- **Search**: Dense/sparse weights (default: 0.6/0.4), top-k parameters
+- **Query Fusion**: Max variations, similarity thresholds
+- **LLM**: Model names, temperature, max tokens
 
-See `config/config.yaml` for all available options.
+Environment variables override config file values. See `config/config.yaml` for defaults.
 
 ## Usage
 
 ### Indexing
 
-Index a single PDF:
 ```bash
+# Index single PDF
 python main.py index document.pdf
-```
 
-Index all PDFs in a directory:
-```bash
+# Index all PDFs in directory
 python main.py index /path/to/pdf/directory/
+
+# Custom config file
+python main.py --config custom_config.yaml index document.pdf
 ```
 
 ### Querying
 
-Ask a question:
 ```bash
 python main.py query "What are the key findings in the document?"
 ```
@@ -89,23 +90,23 @@ python main.py query "What are the key findings in the document?"
 
 ### Indexing Pipeline
 
-1. **Extract**: PDF processor extracts text, tables, and images
-2. **Chunk**: Content is split into retrievable chunks with overlap
-3. **Caption**: Images are captioned using vision-language model
-4. **Embed**: All chunks are converted to vector embeddings
-5. **Store**: Chunks and embeddings are stored in ElasticSearch with metadata
+1. **Extract**: Extracts text, tables, and images from PDF (filters small images)
+2. **Chunk**: Splits content into overlapping chunks (sentence-aware for text, per-table for tables)
+3. **Caption**: Generates captions for images using vision-language model
+4. **Embed**: Converts all chunks to vector embeddings (batch processing)
+5. **Store**: Indexes chunks, embeddings, and metadata in ElasticSearch
 
 ### Query Pipeline
 
-1. **Query Fusion**: Generate multiple query variations from user query (RAG Fusion technique)
-2. **Embed Queries**: Convert all query variations to embeddings
-3. **Hybrid Search**: For each query variation, perform:
-   - Dense search (vector similarity)
-   - Sparse search (BM25)
-   - Combine with weighted scores
-4. **Result Fusion**: Merge results from all queries using Reciprocal Rank Fusion (RRF)
-5. **Rerank**: Use reranking model to score and reorder results
-6. **Generate**: LLM generates final answer with citations from top-ranked chunks
+1. **Query Fusion**: Generates query variations using LLM (skips for very short queries)
+2. **Embed Queries**: Converts all variations to embeddings
+3. **Hybrid Search**: For each variation, ElasticSearch performs:
+   - Dense search (kNN vector similarity)
+   - Sparse search (BM25 keyword matching)
+   - Native score combination
+4. **Result Fusion**: Merges results using Reciprocal Rank Fusion (RRF)
+5. **Rerank**: Neural reranking model scores and reorders final candidates
+6. **Generate**: LLM generates answer with citations from top-ranked chunks
 
 ## Project Structure
 
@@ -125,11 +126,11 @@ w301-pdf-rag/
 │   ├── elasticsearch_client.py      # ElasticSearch operations
 │   ├── indexing_pipeline.py         # PDF indexing pipeline
 │   ├── query_fusion.py              # Query variation generation
-│   ├── retriever.py                 # Hybrid search retriever
+│   ├── hybrid_retriever.py          # Hybrid search retriever
 │   ├── result_fusion.py             # Result fusion (RRF)
 │   ├── reranker.py                  # Result reranking
-│   ├── generator.py                 # Response generation
-│   └── pipeline.py                  # Query processing pipeline
+│   ├── response_generator.py        # Response generation
+│   └── query_pipeline.py            # Query processing pipeline
 ├── elastic-start-local/             # ElasticSearch local setup
 │   ├── docker-compose.yml
 │   ├── start.sh
@@ -145,26 +146,10 @@ w301-pdf-rag/
 ## Requirements
 
 - Python 3.8+
-- ElasticSearch 8.x (via docker-compose in `elastic-start-local/`)
-- External service endpoints for:
-  - Embedding service
-  - Reranking service
-  - Image captioning service
-  - OpenAI API (or compatible LLM endpoint)
+- ElasticSearch 8.x+ (native hybrid search support via `knn` + `query`)
+- External services (OpenAI-compatible APIs):
+  - Embedding service (e.g., qwen3-embedding-0.6b)
+  - Reranking service (e.g., qwen3-reranker-0.6b)
+  - Image captioning service (e.g., internvl-internlm2)
+  - LLM service (for query fusion and response generation)
 
-## Architecture
-
-### Core Components
-
-- **PDF Processor**: Extracts structured content from PDFs
-- **Chunker**: Splits documents into searchable chunks
-- **Embedding Service**: Generates vector representations
-- **ElasticSearch**: Stores documents and enables hybrid search
-- **Query Fusion**: Expands queries for better retrieval
-- **Hybrid Retriever**: Combines dense and sparse search
-- **Reranker**: Refines search results
-- **Response Generator**: Creates answers with citations
-
-## License
-
-[Add your license here]

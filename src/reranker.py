@@ -3,7 +3,7 @@
 import logging
 from typing import List, Optional
 import requests
-from .retriever import RetrievedDocument
+from .hybrid_retriever import RetrievedDocument
 
 logger = logging.getLogger(__name__)
 

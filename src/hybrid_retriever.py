@@ -4,7 +4,6 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 from elasticsearch import Elasticsearch
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +55,10 @@ class HybridRetriever:
     ) -> List[RetrievedDocument]:
         """Retrieve documents using hybrid search.
         
+        This method uses Elasticsearch's native hybrid search combining:
+        - Dense vector search (knn) for semantic similarity
+        - Sparse BM25 search (bool query) for keyword/exact matches
+        
         Args:
             query: Query text
             query_embedding: Query embedding vector
@@ -65,14 +68,88 @@ class HybridRetriever:
             logger.warning("Empty query embedding, falling back to sparse search only")
             return self._sparse_search_documents(query, top_k)
 
+        # Use Elasticsearch native hybrid search
+        return self._hybrid_search(query, query_embedding, top_k)
+
+    def _hybrid_search(
+        self,
+        query: str,
+        query_embedding: List[float],
+        top_k: int,
+    ) -> List[RetrievedDocument]:
+        """Perform native Elasticsearch hybrid search combining knn and BM25.
+        
+        Uses Elasticsearch's native hybrid search which executes both:
+        - kNN (dense vector) search for semantic similarity
+        - BM25 (keyword) search for exact word/phrase matches
+        
+        Elasticsearch automatically combines the scores from both searches using
+        Reciprocal Rank Fusion (RRF) in versions 8.9+, or score combination in older versions.
+        
+        Args:
+            query: Query text for BM25 search
+            query_embedding: Query embedding vector for kNN search
+            top_k: Number of documents to retrieve
+            
+        Returns:
+            List of retrieved documents with combined scores
+        """
+        try:
+            # Elasticsearch native hybrid search using knn + query
+            # This allows Elasticsearch to execute both searches efficiently in a single query
+            # Elasticsearch will combine knn (vector) and query (BM25) results automatically
+            response = self.es_client.search(
+                index=self.index_name,
+                body={
+                    "size": top_k,
+                    "knn": {
+                        "field": "embedding",
+                        "query_vector": query_embedding,
+                        "k": top_k,
+                        "num_candidates": top_k * 2,  # Retrieve more candidates for better results
+                        "boost": self.dense_weight,  # Weight for dense vector search
+                    },
+                    "query": {
+                        "match": {
+                            "text_content": {
+                                "query": query,
+                                "boost": self.sparse_weight,  # Weight for BM25 keyword search
+                            }
+                        }
+                    },
+                    "_source": True,
+                },
+            )
+            logger.debug(
+                f"Hybrid search executed: knn (dense_weight={self.dense_weight}) + "
+                f"BM25 (sparse_weight={self.sparse_weight})"
+            )
+            return self._convert_response_to_documents(response)
+        except Exception as e:
+            logger.error(f"Error in hybrid search: {e}")
+            logger.debug(f"Query: {query}, Top K: {top_k}", exc_info=True)
+            # Fallback to separate searches if native hybrid fails
+            logger.warning("Falling back to separate dense and sparse searches")
+            return self._fallback_hybrid_search(query, query_embedding, top_k)
+
+    def _fallback_hybrid_search(
+        self,
+        query: str,
+        query_embedding: List[float],
+        top_k: int,
+    ) -> List[RetrievedDocument]:
+        """Fallback method using separate searches if native hybrid search fails.
+        
+        This is used when Elasticsearch version doesn't support knn + bool query
+        or if there's an error with the native hybrid search.
+        """
         # Retrieve more candidates from each search type for better hybrid combination
-        # Using 2x multiplier to get sufficient candidates for combining
         dense_results = self._dense_search(query_embedding, top_k * 2)
         sparse_results = self._sparse_search(query, top_k * 2)
         return self._combine_results(dense_results, sparse_results, top_k)
 
     def _dense_search(self, query_embedding: List[float], top_k: int) -> Dict[str, Dict]:
-        """Perform dense vector search."""
+        """Perform dense vector search (fallback method)."""
         try:
             response = self.es_client.search(
                 index=self.index_name,
@@ -96,7 +173,7 @@ class HybridRetriever:
             return {}
 
     def _sparse_search(self, query: str, top_k: int) -> Dict[str, Dict]:
-        """Perform sparse BM25 search."""
+        """Perform sparse BM25 search (fallback method)."""
         try:
             response = self.es_client.search(
                 index=self.index_name,
@@ -126,13 +203,35 @@ class HybridRetriever:
             for hit in response.get("hits", {}).get("hits", [])
         }
 
+    def _convert_response_to_documents(self, response: Dict) -> List[RetrievedDocument]:
+        """Convert Elasticsearch search response directly to RetrievedDocument objects."""
+        documents = []
+        for hit in response.get("hits", {}).get("hits", []):
+            source = hit["_source"]
+            documents.append(
+                RetrievedDocument(
+                    chunk_id=source.get("chunk_id", hit["_id"]),
+                    content=source.get("text_content", ""),
+                    source=source.get("source", ""),
+                    page_number=source.get("page_number", 0),
+                    chunk_type=source.get("chunk_type", "text"),
+                    score=hit["_score"],
+                    metadata=source.get("metadata", {}),
+                )
+            )
+        return documents
+
     def _combine_results(
         self,
         dense_results: Dict[str, Dict],
         sparse_results: Dict[str, Dict],
         top_k: int,
     ) -> List[RetrievedDocument]:
-        """Combine dense and sparse search results with weighted scores."""
+        """Combine dense and sparse search results with weighted scores (fallback method).
+        
+        This method normalizes and combines scores from separate searches when
+        native hybrid search is not available.
+        """
         # Extract scores and normalize
         dense_scores = {k: r["score"] for k, r in dense_results.items()}
         sparse_scores = {k: r["score"] for k, r in sparse_results.items()}

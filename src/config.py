@@ -14,12 +14,7 @@ class Config:
     """Configuration manager."""
 
     def __init__(self, config_path: Optional[Path] = None, env_path: Optional[Path] = None):
-        """Initialize configuration.
-
-        Args:
-            config_path: Path to config.yaml file
-            env_path: Path to .env file
-        """
+        """Initialize configuration."""
         # Load environment variables first
         if env_path:
             load_dotenv(env_path)
@@ -51,11 +46,7 @@ class Config:
         self._apply_env_overrides()
 
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from YAML file.
-
-        Returns:
-            Configuration dictionary
-        """
+        """Load configuration from YAML file."""
         if not self.config_path.exists():
             logger.warning(f"Config file not found: {self.config_path}")
             return {}
@@ -144,12 +135,7 @@ class Config:
             self.config["query_fusion"]["api_key"] = os.getenv("OPENAI_API_KEY")
 
     def _set_nested(self, key_path: str, value: Any):
-        """Set a nested configuration value.
-
-        Args:
-            key_path: Dot-separated path (e.g., "elasticsearch.host")
-            value: Value to set
-        """
+        """Set a nested configuration value."""
         keys = key_path.split(".")
         config = self.config
         for key in keys[:-1]:
@@ -157,15 +143,7 @@ class Config:
         config[keys[-1]] = value
 
     def get(self, key_path: str, default: Any = None) -> Any:
-        """Get a configuration value.
-
-        Args:
-            key_path: Dot-separated path (e.g., "elasticsearch.host")
-            default: Default value if key not found
-
-        Returns:
-            Configuration value or default
-        """
+        """Get a configuration value."""
         keys = key_path.split(".")
         value = self.config
         for key in keys:
@@ -178,82 +156,32 @@ class Config:
         return value
 
     def get_elasticsearch_config(self) -> Dict[str, Any]:
-        """Get ElasticSearch configuration.
-
-        Returns:
-            ElasticSearch configuration dictionary
-        """
         return self.config.get("elasticsearch", {})
 
     def get_chunking_config(self) -> Dict[str, Any]:
-        """Get chunking configuration.
-
-        Returns:
-            Chunking configuration dictionary
-        """
         return self.config.get("chunking", {})
 
     def get_embedding_config(self) -> Dict[str, Any]:
-        """Get embedding configuration.
-
-        Returns:
-            Embedding configuration dictionary
-        """
         return self.config.get("embedding", {})
 
     def get_image_captioning_config(self) -> Dict[str, Any]:
-        """Get image captioning configuration.
-
-        Returns:
-            Image captioning configuration dictionary
-        """
         return self.config.get("image_captioning", {})
 
     def get_search_config(self) -> Dict[str, Any]:
-        """Get search configuration.
-
-        Returns:
-            Search configuration dictionary
-        """
         return self.config.get("search", {})
 
     def get_query_fusion_config(self) -> Dict[str, Any]:
-        """Get query fusion configuration.
-
-        Returns:
-            Query fusion configuration dictionary
-        """
         return self.config.get("query_fusion", {})
 
     def get_result_fusion_config(self) -> Dict[str, Any]:
-        """Get result fusion configuration.
-
-        Returns:
-            Result fusion configuration dictionary
-        """
         return self.config.get("result_fusion", {})
 
     def get_reranking_config(self) -> Dict[str, Any]:
-        """Get reranking configuration.
-
-        Returns:
-            Reranking configuration dictionary
-        """
         return self.config.get("reranking", {})
 
     def get_generation_config(self) -> Dict[str, Any]:
-        """Get generation configuration.
-
-        Returns:
-            Generation configuration dictionary
-        """
         return self.config.get("generation", {})
 
     def get_pdf_processing_config(self) -> Dict[str, Any]:
-        """Get PDF processing configuration.
-
-        Returns:
-            PDF processing configuration dictionary
-        """
         return self.config.get("pdf_processing", {})
 

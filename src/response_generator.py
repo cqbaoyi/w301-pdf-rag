@@ -4,7 +4,7 @@ import logging
 import re
 from typing import List, Optional, Set
 from openai import OpenAI
-from .retriever import RetrievedDocument
+from .hybrid_retriever import RetrievedDocument
 
 logger = logging.getLogger(__name__)
 
@@ -78,36 +78,50 @@ class ResponseGenerator:
     def generate(
         self, query: str, retrieved_docs: List[RetrievedDocument]
     ) -> str:
-        """Generate response with citations.
+        """Generate response with citations."""
+        valid_docs = self._filter_valid_docs(retrieved_docs)
+        context = self._format_context(valid_docs)
+        self._log_context(query, valid_docs, context)
+        
+        prompt = self._build_prompt(query, context)
+        
+        try:
+            answer = self._call_llm(prompt)
+            logger.info(f"\nRaw LLM response (first 500 chars): {answer[:500]}")
+            
+            cited_refs = self._extract_cited_references(answer)
+            answer = self._clean_references_section(answer)
+            answer = self._add_references_section(answer, cited_refs, valid_docs)
+            
+            logger.info(f"Generated response for query: {query[:50]}...")
+            return answer
 
-        Args:
-            query: User query
-            retrieved_docs: Retrieved documents with metadata
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            return f"Error generating response: {str(e)}"
 
-        Returns:
-            Generated response with citations
-        """
-        # Filter out documents with empty or very short content
+    def _filter_valid_docs(self, retrieved_docs: List[RetrievedDocument]) -> List[RetrievedDocument]:
+        """Filter out documents with empty or very short content."""
         MIN_CONTENT_LENGTH = 10
-        valid_docs = [
+        return [
             doc for doc in retrieved_docs 
             if doc.content and len(doc.content.strip()) >= MIN_CONTENT_LENGTH
         ]
-        
-        # Format context with citations - make it more readable and structured
+
+    def _format_context(self, valid_docs: List[RetrievedDocument]) -> str:
+        """Format context with citations."""
         context_parts = []
         for idx, doc in enumerate(valid_docs, start=1):
             citation = f"[{idx}]"
-            # Include chunk type for better context understanding
             chunk_type_info = f" ({doc.chunk_type})" if doc.chunk_type != "text" else ""
             context_parts.append(
                 f"{citation} Source: {doc.source}, Page: {doc.page_number}{chunk_type_info}\n"
                 f"{doc.content}"
             )
+        return "\n\n---\n\n".join(context_parts)
 
-        context = "\n\n---\n\n".join(context_parts)
-
-        # Log the context being sent to LLM for diagnostics
+    def _log_context(self, query: str, valid_docs: List[RetrievedDocument], context: str):
+        """Log context being sent to LLM."""
         logger.info("\n" + "=" * 80)
         logger.info("CONTEXT BEING SENT TO GENERATOR:")
         logger.info("=" * 80)
@@ -117,10 +131,9 @@ class ResponseGenerator:
         logger.info(context)
         logger.info("=" * 80 + "\n")
 
-        # Build prompt optimized for instruction-tuned models
-        # Using a clearer structure that works better with smaller models like gemma-2b-it
-        # The prompt structure uses clear labels and imperative instructions
-        prompt = f"""Answer the question using the information provided in the context documents below.
+    def _build_prompt(self, query: str, context: str) -> str:
+        """Build prompt for LLM."""
+        return f"""Answer the question using the information provided in the context documents below.
 
 CONTEXT DOCUMENTS:
 {context}
@@ -137,45 +150,33 @@ Your task:
 
 Write your answer:"""
 
-        try:
-            # Use system message for better instruction following (if supported)
-            # Some models work better with system messages
-            messages = []
-            messages.append({"role": "user", "content": prompt})
-            
-            response = self.client.chat.completions.create(
-                model=self.llm_model_name,
-                messages=messages,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                max_tokens=self.max_tokens,
-            )
+    def _call_llm(self, prompt: str) -> str:
+        """Call LLM to generate answer."""
+        response = self.client.chat.completions.create(
+            model=self.llm_model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_tokens=self.max_tokens,
+        )
+        return response.choices[0].message.content.strip()
 
-            answer = response.choices[0].message.content.strip()
-            
-            # Log the raw response for diagnostics
-            logger.info(f"\nRaw LLM response (first 500 chars): {answer[:500]}")
+    def _clean_references_section(self, answer: str) -> str:
+        """Remove any existing References section."""
+        answer = re.sub(r'\n\nReferences:.*', '', answer, flags=re.DOTALL)
+        answer = re.sub(r'\n\nreferences:.*', '', answer, flags=re.DOTALL)
+        return answer
 
-            # Extract which citations were actually used in the response
-            cited_refs = self._extract_cited_references(answer)
-            
-            # Remove any existing References section to rebuild it
-            answer = re.sub(r'\n\nReferences:.*', '', answer, flags=re.DOTALL)
-            answer = re.sub(r'\n\nreferences:.*', '', answer, flags=re.DOTALL)
-            
-            # Build references section only for actually cited documents
-            if cited_refs:
-                answer += "\n\nReferences:\n"
-                for ref_num in sorted(cited_refs):
-                    # ref_num is 1-indexed, so we need to map it back to valid_docs
-                    if 1 <= ref_num <= len(valid_docs):
-                        doc = valid_docs[ref_num - 1]
-                        answer += f"[{ref_num}] {doc.source}, Page {doc.page_number} ({doc.chunk_type})\n"
-
-            logger.info(f"Generated response for query: {query[:50]}...")
+    def _add_references_section(self, answer: str, cited_refs: Set[int], 
+                                valid_docs: List[RetrievedDocument]) -> str:
+        """Add references section for cited documents."""
+        if not cited_refs:
             return answer
-
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return f"Error generating response: {str(e)}"
+            
+        answer += "\n\nReferences:\n"
+        for ref_num in sorted(cited_refs):
+            if 1 <= ref_num <= len(valid_docs):
+                doc = valid_docs[ref_num - 1]
+                answer += f"[{ref_num}] {doc.source}, Page {doc.page_number} ({doc.chunk_type})\n"
+        return answer
 

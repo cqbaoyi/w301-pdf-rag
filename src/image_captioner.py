@@ -113,21 +113,3 @@ class ImageCaptioner:
             logger.error(f"Error captioning image: {type(e).__name__}: {error_msg}")
             return None
 
-    def caption_images_batch(
-        self, image_bytes_list: list[bytes], image_formats: list[str]
-    ) -> list[Optional[str]]:
-        """Generate captions for multiple images.
-
-        Args:
-            image_bytes_list: List of image bytes
-            image_formats: List of image formats
-
-        Returns:
-            List of captions (None for failed captioning)
-        """
-        captions = []
-        for image_bytes, image_format in zip(image_bytes_list, image_formats):
-            caption = self.caption_image(image_bytes, image_format)
-            captions.append(caption)
-        return captions
-

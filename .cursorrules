@@ -23,7 +23,7 @@ PDF RAG system with hybrid search (dense + sparse), query fusion (RAG Fusion), a
 
 ## Important Files
 - `main.py`: CLI entry point
-- `src/pipeline.py`: Query processing pipeline
+- `src/query_pipeline.py`: Query processing pipeline
 - `src/indexing_pipeline.py`: PDF indexing pipeline
 - `src/config.py`: Configuration management
 - `config/config.yaml`: Default configuration

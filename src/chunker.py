@@ -3,7 +3,7 @@
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from .pdf_processor import TextExtract, TableExtract, ImageExtract
 
 logger = logging.getLogger(__name__)
@@ -31,14 +31,7 @@ class Chunker:
         table_chunk_mode: str = "per_table",
         max_table_size: int = 1000,
     ):
-        """Initialize chunker.
-
-        Args:
-            text_chunk_size: Maximum size of text chunks (in characters or tokens)
-            text_chunk_overlap: Overlap between consecutive chunks
-            table_chunk_mode: "per_table" or "split"
-            max_table_size: Maximum table size before splitting
-        """
+        """Initialize chunker."""
         self.text_chunk_size = text_chunk_size
         self.text_chunk_overlap = text_chunk_overlap
         self.table_chunk_mode = table_chunk_mode
@@ -47,15 +40,7 @@ class Chunker:
     def chunk_text(
         self, text_extracts: List[TextExtract], source: str
     ) -> List[Chunk]:
-        """Chunk text extracts into smaller units.
-
-        Args:
-            text_extracts: List of text extracts
-            source: Source PDF filename
-
-        Returns:
-            List of text chunks
-        """
+        """Chunk text extracts into smaller units."""
         chunks = []
         chunk_counter = 0
 
@@ -64,78 +49,74 @@ class Chunker:
             if not text:
                 continue
 
-            # Split by sentences first for better chunk boundaries
             sentences = self._split_sentences(text)
-
-            current_chunk = []
-            current_length = 0
-
-            for sentence in sentences:
-                sentence_length = len(sentence)
-
-                # If adding this sentence would exceed chunk size
-                if current_length + sentence_length > self.text_chunk_size and current_chunk:
-                    # Save current chunk
-                    chunk_content = " ".join(current_chunk)
-                    chunks.append(
-                        Chunk(
-                            content=chunk_content,
-                            chunk_type="text",
-                            page_number=extract.page_number,
-                            chunk_id=f"{source}_text_page{extract.page_number}_chunk{chunk_counter}",
-                            source=source,
-                            metadata={"bbox": extract.bbox},
-                        )
-                    )
-                    chunk_counter += 1
-
-                    # Start new chunk with overlap (last few sentences)
-                    if self.text_chunk_overlap > 0 and current_chunk:
-                        overlap_chunk = []
-                        overlap_length = 0
-                        for sent in reversed(current_chunk):
-                            if overlap_length + len(sent) <= self.text_chunk_overlap:
-                                overlap_chunk.insert(0, sent)
-                                overlap_length += len(sent) + 1
-                            else:
-                                break
-                        current_chunk = overlap_chunk
-                        current_length = overlap_length
-                    else:
-                        current_chunk = []
-                        current_length = 0
-
-                current_chunk.append(sentence)
-                current_length += sentence_length + 1  # +1 for space
-
-            # Add remaining content as final chunk
-            if current_chunk:
-                chunks.append(
-                    Chunk(
-                        content=" ".join(current_chunk),
-                        chunk_type="text",
-                        page_number=extract.page_number,
-                        chunk_id=f"{source}_text_page{extract.page_number}_chunk{chunk_counter}",
-                        source=source,
-                        metadata={"bbox": extract.bbox},
-                    )
-                )
+            extract_chunks, chunk_counter = self._chunk_sentences(
+                sentences, extract, source, chunk_counter
+            )
+            chunks.extend(extract_chunks)
 
         logger.info(f"Created {len(chunks)} text chunks from {len(text_extracts)} extracts")
         return chunks
 
+    def _chunk_sentences(self, sentences: List[str], extract: TextExtract, 
+                        source: str, chunk_counter: int) -> Tuple[List[Chunk], int]:
+        """Chunk sentences into chunks with overlap handling."""
+        chunks = []
+        current_chunk = []
+        current_length = 0
+
+        for sentence in sentences:
+            sentence_length = len(sentence)
+
+            if current_length + sentence_length > self.text_chunk_size and current_chunk:
+                chunks.append(self._create_text_chunk(
+                    current_chunk, extract, source, chunk_counter
+                ))
+                chunk_counter += 1
+                
+                current_chunk, current_length = self._prepare_overlap(current_chunk)
+
+            current_chunk.append(sentence)
+            current_length += sentence_length + 1
+
+        if current_chunk:
+            chunks.append(self._create_text_chunk(
+                current_chunk, extract, source, chunk_counter
+            ))
+
+        return chunks, chunk_counter + 1 if current_chunk else chunk_counter
+
+    def _create_text_chunk(self, sentences: List[str], extract: TextExtract, 
+                          source: str, chunk_counter: int) -> Chunk:
+        """Create a text chunk from sentences."""
+        return Chunk(
+            content=" ".join(sentences),
+            chunk_type="text",
+            page_number=extract.page_number,
+            chunk_id=f"{source}_text_page{extract.page_number}_chunk{chunk_counter}",
+            source=source,
+            metadata={"bbox": extract.bbox},
+        )
+
+    def _prepare_overlap(self, current_chunk: List[str]) -> Tuple[List[str], int]:
+        """Prepare overlap chunk from the end of current chunk."""
+        if self.text_chunk_overlap == 0 or not current_chunk:
+            return [], 0
+
+        overlap_chunk = []
+        overlap_length = 0
+        for sent in reversed(current_chunk):
+            if overlap_length + len(sent) <= self.text_chunk_overlap:
+                overlap_chunk.insert(0, sent)
+                overlap_length += len(sent) + 1
+            else:
+                break
+        return overlap_chunk, overlap_length
+
     def chunk_tables(
         self, table_extracts: List[TableExtract], source: str
     ) -> List[Chunk]:
-        """Chunk table extracts.
-
-        Args:
-            table_extracts: List of table extracts
-            source: Source PDF filename
-
-        Returns:
-            List of table chunks
-        """
+        """Chunk table extracts."""
         chunks = []
 
         for idx, extract in enumerate(table_extracts):
@@ -192,18 +173,7 @@ class Chunker:
     def prepare_images(
         self, image_extracts: List[ImageExtract], source: str
     ) -> List[Chunk]:
-        """Prepare image extracts for captioning.
-
-        Note: Images themselves are not chunked, but their captions will be.
-        This method creates placeholder chunks that will be filled with captions later.
-
-        Args:
-            image_extracts: List of image extracts
-            source: Source PDF filename
-
-        Returns:
-            List of image chunks (with empty content, to be filled with captions)
-        """
+        """Prepare image extracts for captioning (creates placeholder chunks)."""
         chunks = []
 
         for idx, extract in enumerate(image_extracts):
@@ -229,14 +199,7 @@ class Chunker:
         return chunks
 
     def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences.
-
-        Args:
-            text: Text to split
-
-        Returns:
-            List of sentences
-        """
+        """Split text into sentences."""
         # Simple sentence splitting by period, exclamation, question mark
         # followed by space or newline
         sentences = re.split(r"([.!?]+\s+)", text)
@@ -252,14 +215,7 @@ class Chunker:
         return result
 
     def _table_to_text(self, table_data: List[List[str]]) -> str:
-        """Convert table data to text representation.
-
-        Args:
-            table_data: 2D list representing table
-
-        Returns:
-            Text representation of table
-        """
+        """Convert table data to text representation."""
         if not table_data:
             return ""
 
@@ -279,17 +235,7 @@ class Chunker:
         source: str,
         base_idx: int,
     ) -> List[Chunk]:
-        """Split a large table into multiple chunks.
-
-        Args:
-            table_data: Table data
-            extract: Original table extract
-            source: Source PDF filename
-            base_idx: Base index for chunk IDs
-
-        Returns:
-            List of table chunks
-        """
+        """Split a large table into multiple chunks."""
         chunks = []
         chunk_size = self.max_table_size // 2  # Rough estimate
 

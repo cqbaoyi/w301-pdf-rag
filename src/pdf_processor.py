@@ -3,11 +3,9 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 import fitz  # PyMuPDF
 import pdfplumber
-from PIL import Image
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +44,15 @@ class PDFProcessor:
 
     def __init__(
         self,
-        prefer_pdfplumber: bool = True,
         min_image_dimension: int = 50,
         min_image_area: int = 2500,
     ):
         """Initialize PDF processor.
 
         Args:
-            prefer_pdfplumber: If True, use pdfplumber for table extraction,
-                otherwise use PyMuPDF for everything
             min_image_dimension: Minimum width or height in pixels to include image
             min_image_area: Minimum area (width * height) in pixels² to include image
         """
-        self.prefer_pdfplumber = prefer_pdfplumber
         self.min_image_dimension = min_image_dimension
         self.min_image_area = min_image_area
 
@@ -161,35 +155,24 @@ class PDFProcessor:
             logger.error(f"Error processing PDF with PyMuPDF: {e}")
             raise
 
-        # Extract tables using pdfplumber (more accurate for tables)
+        # Extract tables using pdfplumber
         table_extracts = []
-        if self.prefer_pdfplumber:
-            try:
-                with pdfplumber.open(str(pdf_path)) as pdf:
-                    for page_num, page in enumerate(pdf.pages, start=1):
-                        tables = page.extract_tables()
-                        for table in tables:
-                            if table and len(table) > 0:
-                                # Get table bounding box (approximate)
-                                # pdfplumber doesn't always provide exact bbox
-                                bbox = (
-                                    0,
-                                    0,
-                                    page.width,
-                                    page.height,
+        try:
+            with pdfplumber.open(str(pdf_path)) as pdf:
+                for page_num, page in enumerate(pdf.pages, start=1):
+                    tables = page.extract_tables()
+                    for table in tables:
+                        if table and len(table) > 0:
+                            bbox = (0, 0, page.width, page.height)
+                            table_extracts.append(
+                                TableExtract(
+                                    table_data=table,
+                                    page_number=page_num,
+                                    bbox=bbox,
                                 )
-
-                                table_extracts.append(
-                                    TableExtract(
-                                        table_data=table,
-                                        page_number=page_num,
-                                        bbox=bbox,
-                                    )
-                                )
-            except Exception as e:
-                logger.warning(
-                    f"Error extracting tables with pdfplumber: {e}. Using PyMuPDF results only."
-                )
+                            )
+        except Exception as e:
+            logger.warning(f"Error extracting tables with pdfplumber: {e}")
 
         logger.info(
             f"Extracted {len(text_extracts)} text blocks, "
@@ -203,54 +186,4 @@ class PDFProcessor:
             )
 
         return text_extracts, table_extracts, image_extracts
-
-    def extract_text_only(self, pdf_path: Path) -> str:
-        """Extract all text from PDF as a single string.
-
-        Args:
-            pdf_path: Path to PDF file
-
-        Returns:
-            Concatenated text from all pages
-        """
-        text_extracts, _, _ = self.process(pdf_path)
-        return "\n\n".join([extract.text for extract in text_extracts])
-
-    def save_image(self, image_extract: ImageExtract, output_path: Path) -> bool:
-        """Save extracted image to file.
-
-        Args:
-            image_extract: ImageExtract object
-            output_path: Path to save image
-
-        Returns:
-            True if saved successfully, False otherwise
-        """
-        try:
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(output_path, "wb") as f:
-                f.write(image_extract.image_bytes)
-
-            logger.debug(f"Saved image to {output_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving image: {e}")
-            return False
-
-    def get_image_pil(self, image_extract: ImageExtract) -> Optional[Image.Image]:
-        """Get PIL Image object from ImageExtract.
-
-        Args:
-            image_extract: ImageExtract object
-
-        Returns:
-            PIL Image object or None if conversion fails
-        """
-        try:
-            return Image.open(io.BytesIO(image_extract.image_bytes))
-        except Exception as e:
-            logger.error(f"Error converting image to PIL: {e}")
-            return None
 

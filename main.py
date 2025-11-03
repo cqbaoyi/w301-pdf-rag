@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.config import Config
 from src.indexing_pipeline import IndexingPipeline
-from src.pipeline import QueryPipeline
+from src.query_pipeline import QueryPipeline
 
 # Configure logging
 logging.basicConfig(

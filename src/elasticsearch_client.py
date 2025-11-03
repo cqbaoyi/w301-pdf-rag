@@ -21,16 +21,7 @@ class ElasticSearchClient:
         use_ssl: bool = False,
         verify_certs: bool = False,
     ):
-        """Initialize ElasticSearch client.
-
-        Args:
-            host: ElasticSearch host
-            port: ElasticSearch port
-            username: Username for authentication
-            password: Password for authentication
-            use_ssl: Whether to use SSL
-            verify_certs: Whether to verify SSL certificates
-        """
+        """Initialize ElasticSearch client."""
         self.host = host
         self.port = port
 
@@ -56,16 +47,7 @@ class ElasticSearchClient:
         embedding_dimension: int = 1024,
         overwrite: bool = False,
     ) -> bool:
-        """Create index with proper mapping for hybrid search.
-
-        Args:
-            index_name: Name of the index to create
-            embedding_dimension: Dimension of embedding vectors
-            overwrite: Whether to delete existing index if it exists
-
-        Returns:
-            True if index was created successfully, False otherwise
-        """
+        """Create index with proper mapping for hybrid search."""
         # Check if index exists
         if self.client.indices.exists(index=index_name):
             if overwrite:
@@ -75,7 +57,7 @@ class ElasticSearchClient:
                 logger.info(f"Index {index_name} already exists")
                 return True
 
-        # Define mapping for hybrid search
+        # Mapping for hybrid search
         mapping = {
             "mappings": {
                 "properties": {
@@ -168,72 +150,7 @@ class ElasticSearchClient:
         logger.error(f"Failed to index {len(remaining_docs)} documents after {max_retries} attempts")
         return False
 
-    def delete_index(self, index_name: str) -> bool:
-        """Delete an index.
-
-        Args:
-            index_name: Name of the index to delete
-
-        Returns:
-            True if index was deleted successfully, False otherwise
-        """
-        try:
-            if self.client.indices.exists(index=index_name):
-                self.client.indices.delete(index=index_name)
-                logger.info(f"Deleted index: {index_name}")
-                return True
-            else:
-                logger.info(f"Index {index_name} does not exist")
-                return False
-        except Exception as e:
-            logger.error(f"Error deleting index: {e}")
-            return False
-
     def index_exists(self, index_name: str) -> bool:
-        """Check if an index exists.
-
-        Args:
-            index_name: Name of the index to check
-
-        Returns:
-            True if index exists, False otherwise
-        """
+        """Check if an index exists."""
         return self.client.indices.exists(index=index_name)
-
-    def get_index_info(self, index_name: str) -> Optional[Dict[str, Any]]:
-        """Get information about an index.
-
-        Args:
-            index_name: Name of the index
-
-        Returns:
-            Dictionary with index information or None if index doesn't exist
-        """
-        try:
-            if not self.client.indices.exists(index=index_name):
-                return None
-
-            stats = self.client.indices.stats(index=index_name)
-            mapping = self.client.indices.get_mapping(index=index_name)
-
-            return {
-                "stats": stats,
-                "mapping": mapping,
-            }
-        except Exception as e:
-            logger.error(f"Error getting index info: {e}")
-            return None
-
-    def health_check(self) -> bool:
-        """Check if ElasticSearch is healthy.
-
-        Returns:
-            True if ElasticSearch is healthy, False otherwise
-        """
-        try:
-            health = self.client.cluster.health()
-            return health.get("status") in ["green", "yellow"]
-        except Exception as e:
-            logger.error(f"ElasticSearch health check failed: {e}")
-            return False
 

@@ -3,7 +3,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 from .pdf_processor import PDFProcessor
 from .chunker import Chunker
 from .image_captioner import ImageCaptioner
@@ -46,14 +46,14 @@ class IndexingPipeline:
 
         embedding_config = config.get_embedding_config()
         self.embedding_service = EmbeddingService(
-            embedding_url=embedding_config.get("url") or embedding_config.get("embedding_url", ""),
+            embedding_url=embedding_config.get("url", ""),
             api_key=embedding_config.get("api_key"),
             batch_size=embedding_config.get("batch_size", 32),
         )
 
         image_config = config.get_image_captioning_config()
         self.image_captioner = ImageCaptioner(
-            image_model_url=image_config.get("url") or image_config.get("image_model_url", ""),
+            image_model_url=image_config.get("url", ""),
             api_key=image_config.get("api_key"),
             timeout=image_config.get("timeout", 30),
             max_image_size=image_config.get("max_image_size", 1024),
@@ -67,157 +67,157 @@ class IndexingPipeline:
         )
 
     def index_pdf(self, pdf_path: Path) -> bool:
-        """Index a single PDF file.
-
-        Args:
-            pdf_path: Path to PDF file
-
-        Returns:
-            True if indexing was successful, False otherwise
-        """
+        """Index a single PDF file."""
         pdf_path = Path(pdf_path)
         source_name = pdf_path.stem
         logger.info(f"Indexing PDF: {pdf_path}")
 
         try:
-            # Extract and chunk content
-            text_extracts, table_extracts, image_extracts = self.pdf_processor.process(pdf_path)
-            text_chunks = self.chunker.chunk_text(text_extracts, source_name)
-            table_chunks = self.chunker.chunk_tables(table_extracts, source_name)
-            image_chunks = self.chunker.prepare_images(image_extracts, source_name)
-
-            # Generate captions for images
-            successful_captions = 0
-            failed_captions = 0
-            total_images = len(image_chunks)
+            text_chunks, table_chunks, image_chunks = self._extract_and_chunk(pdf_path, source_name)
+            self._caption_images(image_chunks)
             
-            if total_images > 0:
-                logger.info(f"Processing {total_images} images for captioning...")
-                start_time = time.time()
-                progress_interval = max(1, total_images // 20)  # Log progress ~20 times
-                if total_images > 100:
-                    progress_interval = max(10, total_images // 20)  # For large batches, log less frequently
-                
-            for idx, chunk in enumerate(image_chunks, start=1):
-                # Log progress periodically
-                if total_images > 0 and (idx % progress_interval == 0 or idx == 1 or idx == total_images):
-                    elapsed = time.time() - start_time
-                    percentage = (idx / total_images) * 100
-                    if idx > 1:
-                        avg_time_per_image = elapsed / idx
-                        remaining_images = total_images - idx
-                        estimated_remaining = avg_time_per_image * remaining_images
-                        logger.info(
-                            f"Image captioning progress: {idx}/{total_images} ({percentage:.1f}%) | "
-                            f"Successful: {successful_captions}, Failed: {failed_captions} | "
-                            f"Elapsed: {elapsed:.1f}s, Estimated remaining: {estimated_remaining:.1f}s"
-                        )
-                    else:
-                        logger.info(f"Starting image captioning: {idx}/{total_images} ({percentage:.1f}%)")
-                
-                if image_bytes := chunk.metadata.get("image_bytes"):
-                    image_start_time = time.time()
-                    # Log first few images at INFO level to show progress
-                    if idx <= 3:
-                        logger.info(
-                            f"Captioning image {idx}/{total_images} from page {chunk.page_number} "
-                            f"(format: {chunk.metadata.get('image_format', 'PNG')})..."
-                        )
-                    else:
-                        logger.debug(
-                            f"Captioning image {idx}/{total_images} from page {chunk.page_number} "
-                            f"(format: {chunk.metadata.get('image_format', 'PNG')})..."
-                        )
-                    try:
-                        caption = self.image_captioner.caption_image(
-                            image_bytes, chunk.metadata.get("image_format", "PNG")
-                        )
-                        image_time = time.time() - image_start_time
-                        # Log first few or slow images at INFO level
-                        if idx <= 3 or image_time > 10:
-                            status = "success" if caption else "failed (using fallback)"
-                            logger.info(
-                                f"Completed image {idx}/{total_images} from page {chunk.page_number} "
-                                f"in {image_time:.1f}s - {status}"
-                            )
-                        if caption:
-                            chunk.content = caption
-                            successful_captions += 1
-                        else:
-                            # Fallback caption
-                            chunk.content = f"Image from page {chunk.page_number} (caption unavailable)"
-                            failed_captions += 1
-                            logger.warning(
-                                f"Failed to caption image on page {chunk.page_number}, using fallback"
-                            )
-                    except Exception as e:
-                        # Fallback caption on any exception
-                        chunk.content = f"Image from page {chunk.page_number} (caption failed: {type(e).__name__})"
-                        failed_captions += 1
-                        # Only log exception type and message, not full exception (may contain binary data)
-                        error_msg = str(e)[:200] if len(str(e)) <= 200 else str(e)[:200] + "..."
-                        logger.warning(
-                            f"Exception captioning image on page {chunk.page_number}: "
-                            f"{type(e).__name__}: {error_msg}. Using fallback."
-                        )
-                else:
-                    # No image bytes available
-                    chunk.content = f"Image from page {chunk.page_number} (image data unavailable)"
-                    failed_captions += 1
-            
-            if total_images > 0:
-                total_time = time.time() - start_time
-                logger.info(
-                    f"Image captioning complete: {successful_captions} successful, "
-                    f"{failed_captions} failed (using fallback captions) | "
-                    f"Total time: {total_time:.1f}s, Average: {total_time/total_images:.2f}s per image"
-                )
-
             all_chunks = text_chunks + table_chunks + image_chunks
             if not all_chunks:
                 logger.warning(f"No chunks extracted from {pdf_path}")
                 return False
 
-            # Generate embeddings
-            embeddings = self.embedding_service.embed_texts([chunk.content for chunk in all_chunks])
-
-            # Prepare documents (skip chunks with failed embeddings)
-            documents = [
-                {
-                    "text_content": chunk.content,
-                    "embedding": embedding,
-                    "source": chunk.source,
-                    "page_number": chunk.page_number,
-                    "chunk_type": chunk.chunk_type,
-                    "chunk_id": chunk.chunk_id,
-                    "metadata": self._prepare_metadata(chunk.metadata),
-                }
-                for chunk, embedding in zip(all_chunks, embeddings)
-                if embedding is not None
-            ]
-
+            documents = self._prepare_documents(all_chunks)
             if not documents:
                 logger.error("No documents to index after embedding generation")
                 return False
 
-            # Ensure index exists
+            self._ensure_index_exists()
+            
             index_name = self.config.get_elasticsearch_config().get("index_name", "pdf_rag_index")
-            if not self.es_client.index_exists(index_name):
-                embedding_dim = len(embeddings[0]) if embeddings[0] else 1024
-                self.es_client.create_index(index_name, embedding_dimension=embedding_dim)
-
-            # Index documents
             success = self.es_client.index_documents(index_name, documents, batch_size=100)
             if success:
                 logger.info(f"Successfully indexed {len(documents)} chunks from {pdf_path}")
             return success
 
         except Exception as e:
-            # Log exception without full traceback to avoid binary data in output
             error_msg = str(e)[:200] if len(str(e)) <= 200 else str(e)[:200] + "..."
             logger.error(f"Error indexing PDF {pdf_path}: {type(e).__name__}: {error_msg}")
             logger.debug(f"Full exception details:", exc_info=True)
             return False
+
+    def _extract_and_chunk(self, pdf_path: Path, source_name: str) -> Tuple[List, List, List]:
+        """Extract content from PDF and chunk it."""
+        text_extracts, table_extracts, image_extracts = self.pdf_processor.process(pdf_path)
+        text_chunks = self.chunker.chunk_text(text_extracts, source_name)
+        table_chunks = self.chunker.chunk_tables(table_extracts, source_name)
+        image_chunks = self.chunker.prepare_images(image_extracts, source_name)
+        return text_chunks, table_chunks, image_chunks
+
+    def _caption_images(self, image_chunks: List):
+        """Generate captions for image chunks with progress logging."""
+        total_images = len(image_chunks)
+        if total_images == 0:
+            return
+
+        logger.info(f"Processing {total_images} images for captioning...")
+        start_time = time.time()
+        progress_interval = max(1, total_images // 20)
+        if total_images > 100:
+            progress_interval = max(10, total_images // 20)
+
+        successful_captions = 0
+        failed_captions = 0
+
+        for idx, chunk in enumerate(image_chunks, start=1):
+            self._log_captioning_progress(
+                idx, total_images, start_time, successful_captions, failed_captions, progress_interval
+            )
+            
+            if image_bytes := chunk.metadata.get("image_bytes"):
+                success = self._caption_single_image(chunk, idx, total_images, image_bytes)
+                if success:
+                    successful_captions += 1
+                else:
+                    failed_captions += 1
+            else:
+                chunk.content = f"Image from page {chunk.page_number} (image data unavailable)"
+                failed_captions += 1
+
+        total_time = time.time() - start_time
+        logger.info(
+            f"Image captioning complete: {successful_captions} successful, "
+            f"{failed_captions} failed (using fallback captions) | "
+            f"Total time: {total_time:.1f}s, Average: {total_time/total_images:.2f}s per image"
+        )
+
+    def _log_captioning_progress(self, idx: int, total: int, start_time: float, 
+                                 successful: int, failed: int, progress_interval: int):
+        """Log progress for image captioning."""
+        if idx % progress_interval == 0 or idx == 1 or idx == total:
+            elapsed = time.time() - start_time
+            percentage = (idx / total) * 100
+            if idx > 1:
+                avg_time = elapsed / idx
+                remaining = total - idx
+                estimated = avg_time * remaining
+                logger.info(
+                    f"Image captioning progress: {idx}/{total} ({percentage:.1f}%) | "
+                    f"Successful: {successful}, Failed: {failed} | "
+                    f"Elapsed: {elapsed:.1f}s, Estimated remaining: {estimated:.1f}s"
+                )
+            else:
+                logger.info(f"Starting image captioning: {idx}/{total} ({percentage:.1f}%)")
+
+    def _caption_single_image(self, chunk, idx: int, total: int, image_bytes: bytes) -> bool:
+        """Caption a single image and update chunk content."""
+        image_format = chunk.metadata.get("image_format", "PNG")
+        
+        if idx <= 3:
+            logger.info(f"Captioning image {idx}/{total} from page {chunk.page_number} (format: {image_format})...")
+        else:
+            logger.debug(f"Captioning image {idx}/{total} from page {chunk.page_number} (format: {image_format})...")
+
+        image_start_time = time.time()
+        try:
+            caption = self.image_captioner.caption_image(image_bytes, image_format)
+            image_time = time.time() - image_start_time
+            
+            if idx <= 3 or image_time > 10:
+                status = "success" if caption else "failed (using fallback)"
+                logger.info(f"Completed image {idx}/{total} from page {chunk.page_number} in {image_time:.1f}s - {status}")
+            
+            if caption:
+                chunk.content = caption
+                return True
+            else:
+                chunk.content = f"Image from page {chunk.page_number} (caption unavailable)"
+                logger.warning(f"Failed to caption image on page {chunk.page_number}, using fallback")
+                return False
+                
+        except Exception as e:
+            chunk.content = f"Image from page {chunk.page_number} (caption failed: {type(e).__name__})"
+            error_msg = str(e)[:200] if len(str(e)) <= 200 else str(e)[:200] + "..."
+            logger.warning(f"Exception captioning image on page {chunk.page_number}: {type(e).__name__}: {error_msg}. Using fallback.")
+            return False
+
+    def _prepare_documents(self, chunks: List) -> List[dict]:
+        """Generate embeddings and prepare documents for indexing."""
+        embeddings = self.embedding_service.embed_texts([chunk.content for chunk in chunks])
+        return [
+            {
+                "text_content": chunk.content,
+                "embedding": embedding,
+                "source": chunk.source,
+                "page_number": chunk.page_number,
+                "chunk_type": chunk.chunk_type,
+                "chunk_id": chunk.chunk_id,
+                "metadata": self._prepare_metadata(chunk.metadata),
+            }
+            for chunk, embedding in zip(chunks, embeddings)
+            if embedding is not None
+        ]
+
+    def _ensure_index_exists(self):
+        """Ensure Elasticsearch index exists, create if needed."""
+        index_name = self.config.get_elasticsearch_config().get("index_name", "pdf_rag_index")
+        if not self.es_client.index_exists(index_name):
+            embedding_dim = self.config.get_embedding_config().get("dimension", 1024)
+            self.es_client.create_index(index_name, embedding_dimension=embedding_dim)
 
     def index_directory(self, directory: Path) -> int:
         """Index all PDF files in a directory.
