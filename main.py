@@ -12,16 +12,33 @@ from src.config import Config
 from src.indexing_pipeline import IndexingPipeline
 from src.query_pipeline import QueryPipeline
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
+
+
+def setup_logging(verbose: bool = False):
+    """Configure logging based on verbosity level.
+    
+    Args:
+        verbose: If True, enable full logging with timestamps. Default is quiet mode.
+    """
+    if verbose:
+        # Verbose mode: full logging with timestamps
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+    else:
+        # Quiet mode (default): no timestamps, only WARNING and ERROR
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(levelname)s: %(message)s",
+        )
 
 
 def index_command(args):
     """Index PDF files."""
+    # Index always uses verbose logging (old way)
+    setup_logging(verbose=True)
     config = Config(config_path=args.config, env_path=args.env)
     pipeline = IndexingPipeline(config)
 
@@ -46,6 +63,9 @@ def index_command(args):
 
 def query_command(args):
     """Query the RAG system."""
+    # Check verbose flag from either main parser or subparser
+    verbose = getattr(args, 'verbose', False)
+    setup_logging(verbose=verbose)
     config = Config(config_path=args.config, env_path=args.env)
     pipeline = QueryPipeline(config)
 
@@ -74,6 +94,11 @@ def main():
         type=Path,
         help="Path to .env file",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging with timestamps for query command (default is quiet mode)",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
@@ -95,6 +120,11 @@ def main():
         "query",
         type=str,
         help="Query to ask",
+    )
+    query_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging with timestamps for query (default is quiet mode)",
     )
 
     args = parser.parse_args()

@@ -95,6 +95,7 @@ class QueryPipeline:
 
     def query(self, user_query: str) -> str:
         """Process a user query and generate response."""
+        print(f"Processing query: {user_query}")
         logger.info(f"Processing query: {user_query}")
 
         try:
@@ -112,6 +113,7 @@ class QueryPipeline:
             self._log_ranked_results(reranked_results)
 
             response = self.generator.generate(user_query, reranked_results)
+            print("Successfully generated response")
             logger.info("Successfully generated response")
             return response
 
@@ -123,12 +125,16 @@ class QueryPipeline:
         """Generate query variations and log them."""
         query_variations = self.query_fusion.generate_variations(user_query)
         logger.info(f"Generated {len(query_variations)} query variations")
-        print("\n" + "=" * 80)
-        print("QUERY VARIATIONS:")
-        print("=" * 80)
-        for idx, variation in enumerate(query_variations, start=1):
-            print(f"{idx}. {variation}")
-        print("=" * 80 + "\n")
+        
+        # Only show query variations if INFO level is enabled (not in quiet mode)
+        if logger.isEnabledFor(logging.INFO):
+            print("\n" + "=" * 80)
+            print("QUERY VARIATIONS:")
+            print("=" * 80)
+            for idx, variation in enumerate(query_variations, start=1):
+                print(f"{idx}. {variation}")
+            print("=" * 80 + "\n")
+        
         return query_variations
 
     def _retrieve_for_variations(self, query_variations: List[str], 

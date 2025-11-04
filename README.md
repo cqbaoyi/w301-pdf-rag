@@ -39,7 +39,11 @@ A RAG (Retrieval Augmented Generation) system for querying PDF documents. Featur
 
 5. **Query the system**:
    ```bash
+   # Quiet mode (default)
    python main.py query "What is the main topic of the document?"
+   
+   # Verbose mode (with --verbose flag)
+   python main.py query --verbose "What is the main topic of the document?"
    ```
 
 ## Configuration
@@ -83,8 +87,14 @@ python main.py --config custom_config.yaml index document.pdf
 ### Querying
 
 ```bash
+# Default: Quiet mode (minimal output, no timestamps)
 python main.py query "What are the key findings in the document?"
+
+# Verbose mode: Full logging with timestamps
+python main.py query --verbose "What are the key findings in the document?"
 ```
+
+By default, query uses quiet mode showing only essential progress and the final response. Use `--verbose` to enable detailed logging with timestamps.
 
 ## How It Works
 
