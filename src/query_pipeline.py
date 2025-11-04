@@ -1,7 +1,7 @@
 """Main pipeline for query processing and response generation."""
 
 import logging
-from typing import Optional, List
+from typing import List
 from .config import Config
 from .query_fusion import QueryFusion
 from .embeddings import EmbeddingService

@@ -163,3 +163,13 @@ w301-pdf-rag/
   - Image captioning service (e.g., internvl-internlm2)
   - LLM service (for query fusion and response generation)
 
+## Potential Improvements
+
+- **Coreference Resolution**: Add support for resolving pronouns in consecutive queries. For example, if a user asks "What did Thomas Jefferson say about the law?" followed by "What else did he say?", the system could automatically expand "he" to "Thomas Jefferson" in the second query. This would improve the natural flow of conversational interactions with the system.
+
+- **Image and Table Query Stability**: Currently, queries specifically targeting images or tables can produce unstable or undesirable results. This is due to limitations in how image captions and table content are indexed and retrieved. Potential improvements include:
+  - Better integration of image captions with surrounding text context
+  - Improved table structure preservation during indexing and retrieval
+  - Enhanced formatting of table content in responses for better LLM comprehension
+  - More robust matching between queries and table/image content
+

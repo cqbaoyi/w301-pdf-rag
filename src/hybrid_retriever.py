@@ -248,8 +248,10 @@ class HybridRetriever:
             sparse_norm = sparse_scores.get(chunk_id, 0) / sparse_max if sparse_max > 0 else 0
             combined_score = self.dense_weight * dense_norm + self.sparse_weight * sparse_norm
             
-            source = (dense_results.get(chunk_id) or sparse_results.get(chunk_id))["source"]
-            combined[chunk_id] = {"score": combined_score, "source": source}
+            # Get source from either dense or sparse results
+            result_data = dense_results.get(chunk_id) or sparse_results.get(chunk_id)
+            if result_data:
+                combined[chunk_id] = {"score": combined_score, "source": result_data["source"]}
 
         # Sort by score and convert to documents
         sorted_chunks = dict(sorted(combined.items(), key=lambda x: x[1]["score"], reverse=True)[:top_k])
